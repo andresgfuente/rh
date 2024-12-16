@@ -46,8 +46,12 @@ def main():
 
     # Botón para análisis
     submit = st.button("Ayúdame con el análisis")
+    reset_button = st.button("Limpiar Resultados")
+    
+    
     if 'results_df' not in st.session_state:
         st.session_state['results_df'] = pd.DataFrame(columns=[
+        "Nombre Archivo",
         "Nombre", 
         "Apellido",
         "Nombre y Apellido",
@@ -63,6 +67,28 @@ def main():
         "Requisitos Excluyentes",
         "categoria"
     ])
+        
+   # Limpiar resultados si el botón de "Limpiar Resultados" es presionado
+    if reset_button:
+        st.session_state['results_df'] = pd.DataFrame(columns=[
+            "Nombre", 
+            "Apellido",
+            "Nombre y Apellido",
+            "Sexo",
+            "Correo",
+            "Teléfono",
+            "Fecha de Nacimiento",
+            "Formación Académica",
+            "Experiencia Laboral",
+            "Nombre del Archivo",
+            "Match Score (%)",
+            "Fortalezas",
+            "Debilidades",
+            "Requisitos Excluyentes"
+        ])
+        st.success("Los resultados han sido limpiados.")     
+        
+        
     # Manejo del botón
     if submit:
         if not job_description.strip():
@@ -91,7 +117,7 @@ def main():
                     fecha_nacimiento = dictionario_texto.get("Fecha de Nacimiento", "No se menciona")
                     formacion_academica = dictionario_texto.get("Formacion Academica", "No se menciona")
                     experiencia_laboral = dictionario_texto.get("Experiencia Laboral", "No se menciona")
-                    
+                    nombre_archivo=pdf[n].name
                     
                     
                     #st.subheader("👉 " + dictionario_texto['Nombre y Apellido'])
@@ -129,6 +155,7 @@ def main():
                         st.session_state['results_df'] = pd.concat([
                         st.session_state['results_df'], 
                         pd.DataFrame([{
+                            "Nombre Archivo":nombre_archivo,
                             "Nombre": nombre,
                             "Apellido": apellido,
                             "Nombre y Apellido": nombre_apellido,
