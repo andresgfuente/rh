@@ -8,7 +8,19 @@ from langchain.output_parsers import ResponseSchema, StructuredOutputParser
 from langchain import PromptTemplate
 import re
 import ast
+from docx import Document as DocxDocument 
 import time
+import streamlit as st
+
+from pptx import Presentation
+
+session = boto3.Session()
+
+s3_client = boto3.client('s3', region_name='us-east-1')
+textract_client = boto3.client('textract',region_name='us-east-1')
+
+# Configurar el nombre de tu bucket
+bucket_name = 'textract-console-us-east-1-4a58348c-7a8e-4dc3-b4d9-9478d91fe43f'
 
 session = boto3.Session()
 bedrock = session.client(service_name='bedrock-runtime',region_name='us-east-1')
@@ -23,7 +35,7 @@ def read_pdf_data(pdf_file):
 def clasificador_texto(texto):
     session=boto3.Session()
     bedrock=session.client(service_name='bedrock-runtime',region_name='us-east-1')
-    llm=ChatBedrock(client=bedrock,model_id='anthropic.claude-3-sonnet-20240229-v1:0',region_name='us-east-1')
+    llm=ChatBedrock(client=bedrock,model_id='anthropic.claude-3-sonnet-20240229-v1:0',region_name='us-east-1',model_kwargs={"temperature": 0.0})
 
     response_schema=[
         ResponseSchema(name='Nombre',description='Nombre del Candidato. Por ejemplo: Raul, Juan, Oscar'),
@@ -55,41 +67,57 @@ def clasificador_texto(texto):
 
 # iterate over files in 
 # that user uploaded PDF files, one by one
-def create_docs(user_pdf_list, unique_id):
-    docs=[]
-    for filename in user_pdf_list:
-        
-        chunks=read_pdf_data(filename)
+def create_docs(user_file_list, unique_id):
+    docs = []
 
-        #Adding items to our list - Adding data & its metadata
+    for file in user_file_list:
+        # Leer contenido dependiendo del tipo de archivo
+        if file.name.endswith(".pdf"):
+            chunks = read_pdf_data(file)  # Función para extraer texto de PDFs
+        elif file.name.endswith(".docx"):
+            chunks = read_docx_data(file)  # Nueva función para extraer texto de Word
+        elif file.name.lower().endswith((".png", ".jpg", ".jpeg")):
+            upload_to_s3(file, bucket_name, file.name)
+            chunks = process_pdf(bucket=bucket_name, document=file.name) 
+            st.write(chunks)# Nueva función para extraer texto de imágenes
+        elif file.name.endswith(".pptx"):
+            chunks = extract_text_from_pptx(file)
+            #st.write(chunks)# Nueva función para extraer texto de PowerPoint
+        else:
+            raise ValueError(f"Tipo de archivo no soportado: {file.name}")
+
+        if len(chunks.strip()) < 5:  # Si el texto es menor a 5 caracteres
+            try:
+                print(f"El contenido extraído de {file.name} es insuficiente. Intentando OCR...")
+                print(f'realizando proceso de ocr para archivo {file.name.lower()}')
+                #upload_to_s3(file, bucket_name, file.name)
+                upload_to_s3(file, bucket_name, file.name)
+                chunks = process_pdf(bucket=bucket_name, document=file.name)
+                #st.write(chunks)
+                if chunks==None or len(chunks)<=10:
+                    chunks="[Contenido no extraído]"
+                    print(f'error al procesar el archivo {file.name.lower()}')
+                    
+
+            except Exception as e:
+                st.write(f"OCR falló para {file.name}: {e}")
+                chunks = "[Contenido no extraído]"
+        
+        # Agregar elementos a la lista con los datos y metadatos
+        
         docs.append(Document(
             page_content=chunks,
-            metadata={"name": filename.name,"id":filename.file_id,"type=":filename.type,"size":filename.size,"unique_id":unique_id},
+            metadata={
+                "name": file.name,
+                "id": file.file_id,
+                "type": file.type,
+                "size": file.size,
+                "unique_id": unique_id,
+            },
         ))
 
     return docs
 
-def preguntar_llm(extracted_text,input):
-    doc_message = {
-        "role": "user",
-        "content": [
-            {
-                "text": extracted_text
-            },
-            { 
-                "text": 'Actua como un experto reclutador de talentos para una empresa del ambito financiero.Dame una breve descripcion de las fortalezas y debilidades del candidato respecto a la Descripcion del Trabajo. Descripcion del trabajo:'+input 
-            }
-        ]
-    }
-    response = bedrock.converse(
-        modelId="amazon.nova-pro-v1:0",
-        messages=[doc_message],
-        inferenceConfig={
-            "maxTokens": 4000,
-            "temperature": 0
-        },
-    )
-    return response['output']['message']['content'][0]['text']
 
 
 
@@ -113,7 +141,7 @@ def embedding(text):
 def fortalezas_y_debilidades(texto,descripcion_trabajo):
     session=boto3.Session()
     bedrock=session.client(service_name='bedrock-runtime',region_name='us-east-1')
-    llm=ChatBedrock(client=bedrock,model_id='anthropic.claude-3-sonnet-20240229-v1:0',region_name='us-east-1')
+    llm=ChatBedrock(client=bedrock,model_id='anthropic.claude-3-sonnet-20240229-v1:0',region_name='us-east-1',model_kwargs={"temperature": 0.1})
 
     response_schema=[
         ResponseSchema(name='Fortalezas',description='Cuales son las Fortalezas del Candidato con respecto al la descripcion del trabajo?'),
@@ -156,7 +184,7 @@ def fortalezas_y_debilidades(texto,descripcion_trabajo):
 def analizar_requerimientos_excluyentes(texto,requerimientos):
     session=boto3.Session()
     bedrock=session.client(service_name='bedrock-runtime',region_name='us-east-1')
-    llm=ChatBedrock(client=bedrock,model_id='anthropic.claude-3-sonnet-20240229-v1:0',region_name='us-east-1')
+    llm=ChatBedrock(client=bedrock,model_id='anthropic.claude-3-sonnet-20240229-v1:0',region_name='us-east-1',model_kwargs={"temperature": 0.1})
     template='''
     Actua como un reclutador de talentos con experiencia en el ambito bancario.
     A continuacion, se te proporcionara informacion sobre el curriculum vitae de un candidato 
@@ -179,3 +207,117 @@ def analizar_requerimientos_excluyentes(texto,requerimientos):
     prompt_text = prompt.format(requerimientos=requerimientos, texto=texto)
     respuesta=llm.invoke(prompt_text).content
     return respuesta
+
+
+
+
+
+
+
+# Función para subir el archivo a S3
+def upload_to_s3(file, bucket, object_name):
+    try:
+        s3_client.upload_fileobj(file, bucket, object_name)
+        #st.success(f'Archivo {object_name} subido a {bucket}.')
+    except Exception as e:
+        st.error(f'Error al subir el archivo: {e}')
+
+
+def start_textract(bucket, document):
+    response = textract_client.start_document_analysis(
+        DocumentLocation={
+            'S3Object': {
+                'Bucket': bucket,
+                'Name': document,
+            }
+        },
+        FeatureTypes=["TABLES", "FORMS"]  # Ajusta según lo que necesites
+    )
+    return response['JobId']
+
+# Función para verificar el estado del trabajo
+def check_job_status(job_id):
+    response = textract_client.get_document_analysis(JobId=job_id)
+    return response
+
+# Función para procesar el PDF
+def process_pdf(bucket, document):
+    job_id = start_textract(bucket, document)
+    print(f'Se inició el trabajo con ID: {job_id}')
+
+    # Esperar hasta que el trabajo esté completo
+    while True:
+        response = check_job_status(job_id)
+        status = response['JobStatus']
+        print(f'Status del trabajo: {status}')
+
+        if status in ['SUCCEEDED', 'FAILED']:
+            break
+
+        time.sleep(5)  # Espera antes de volver a verificar el estado
+
+    if status == 'SUCCEEDED':
+        # Recuperar y procesar todas las páginas usando NextToken
+        text = ''
+        next_token = None
+        
+        while True:
+            if next_token:
+                # Si hay más páginas, hacer otra llamada con el NextToken
+                response = textract_client.get_document_analysis(
+                    JobId=job_id,
+                    NextToken=next_token
+                )
+            else:
+                # Primera llamada ya realizada previamente en check_job_status
+                response = check_job_status(job_id)
+
+            # Procesar los resultados
+            pages = response.get('Blocks', [])
+            for block in pages:
+                if block['BlockType'] == 'LINE':
+                    text += block['Text'] + '\n'
+            
+            # Verificar si hay más resultados (páginas)
+            next_token = response.get('NextToken')
+            if not next_token:
+                break
+        
+        
+        return text
+    
+    
+def read_docx_data(file):
+    docx = DocxDocument(file)
+    text = []
+    for paragraph in docx.paragraphs:
+        text.append(paragraph.text)
+    return "\n".join(text)
+
+
+
+def extract_text_from_pptx(file):
+    """
+    Extrae el texto de un archivo PowerPoint (.pptx).
+
+    Args:
+        file: Archivo PowerPoint a procesar.
+
+    Returns:
+        str: Texto extraído del PowerPoint.
+    """
+    try:
+        # Cargar la presentación
+        presentation = Presentation(file)
+        text = []
+
+        # Iterar a través de las diapositivas y sus elementos
+        for slide in presentation.slides:
+            for shape in slide.shapes:
+                if shape.has_text_frame:  # Verificar si el elemento tiene un marco de texto
+                    for paragraph in shape.text_frame.paragraphs:
+                        text.append(paragraph.text)
+
+        return "\n".join(text)
+    except Exception as e:
+        raise ValueError(f"Error al procesar el archivo PowerPoint: {e}")

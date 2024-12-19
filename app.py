@@ -40,7 +40,7 @@ def main():
     # Cargar archivos PDF
     pdf = st.file_uploader(
         "Suba los documentos aquí (formato PDF solamente admitido)", 
-        type=["pdf"], 
+        type=["pdf", "docx", "png", "jpg", "jpeg","pptx"], 
         accept_multiple_files=True
     )
 
@@ -105,73 +105,86 @@ def main():
 
                 # Mostrar la cantidad de currículums cargados
                 st.write("*Se han cargado:* " + str(len(final_docs_list)) + " currículums")
+                progress_bar = st.progress(0)
+                percent_text = st.empty() 
                 for n in range(len(final_docs_list)):
                     # Clasificar texto del currículum
-                    dictionario_texto = clasificador_texto(final_docs_list[n].page_content)
-                    nombre = dictionario_texto.get("Nombre", "No se menciona")
-                    apellido = dictionario_texto.get("Apellido", "No se menciona")
-                    nombre_apellido = dictionario_texto.get("Nombre y Apellido", "No se menciona")
-                    sexo = dictionario_texto.get("Sexo", "No se menciona")
-                    correo = dictionario_texto.get("Correo", "No se menciona")
-                    telefono = dictionario_texto.get("Telefono", "No se menciona")
-                    fecha_nacimiento = dictionario_texto.get("Fecha de Nacimiento", "No se menciona")
-                    formacion_academica = dictionario_texto.get("Formacion Academica", "No se menciona")
-                    experiencia_laboral = dictionario_texto.get("Experiencia Laboral", "No se menciona")
-                    nombre_archivo=pdf[n].name
+                    if final_docs_list[n].page_content!="[Contenido no extraído]":
+                        dictionario_texto = clasificador_texto(final_docs_list[n].page_content)
+                        nombre = dictionario_texto.get("Nombre", "No se menciona")
+                        apellido = dictionario_texto.get("Apellido", "No se menciona")
+                        nombre_apellido = dictionario_texto.get("Nombre y Apellido", "No se menciona")
+                        sexo = dictionario_texto.get("Sexo", "No se menciona")
+                        correo = dictionario_texto.get("Correo", "No se menciona")
+                        telefono = dictionario_texto.get("Telefono", "No se menciona")
+                        fecha_nacimiento = dictionario_texto.get("Fecha de Nacimiento", "No se menciona")
+                        formacion_academica = dictionario_texto.get("Formacion Academica", "No se menciona")
+                        experiencia_laboral = dictionario_texto.get("Experiencia Laboral", "No se menciona")
+                        nombre_archivo=pdf[n].name
                     
-                    
-                    #st.subheader("👉 " + dictionario_texto['Nombre y Apellido'])
-
-                    # Mostrar archivo cargado
-                    #st.write("**File** : " + str(n + 1))
-
-                    # Calcular similitud con descripción del trabajo
-                    embedding1 = embedding(final_docs_list[n].page_content)
-                    embedding2 = embedding(job_description)
-                    similitud = str(round((1 - distance.cosine(embedding1, embedding2)) * 100, 2))
-                    #st.info("**Match Score** : " + similitud + '%')
-
-                    with st.expander('Show me 👀'):
-                        # Calcular fortalezas y debilidades
-                        fortalezas, debilidades,categoria = fortalezas_y_debilidades(final_docs_list[n].page_content, job_description)
                         
-                        # Analizar requisitos excluyentes
-                        resultado_requerimientos = analizar_requerimientos_excluyentes(
-                            texto=final_docs_list[n].page_content, 
-                            requerimientos=requerimientos_excluyentes
-                        )
+                        #st.subheader("👉 " + dictionario_texto['Nombre y Apellido'])
 
+                        # Mostrar archivo cargado
+                        #st.write("**File** : " + str(n + 1))
+
+                        # Calcular similitud con descripción del trabajo
+                        embedding1 = embedding(final_docs_list[n].page_content)
+                        embedding2 = embedding(job_description)
+                        similitud = str(round((1 - distance.cosine(embedding1, embedding2)) * 100, 2))
+                        #st.info("**Match Score** : " + similitud + '%')
+
+                        with st.expander('Show me 👀'):
+                            # Calcular fortalezas y debilidades
+                            fortalezas, debilidades,categoria = fortalezas_y_debilidades(final_docs_list[n].page_content, job_description)
+                            
+                            # Analizar requisitos excluyentes
+                            resultado_requerimientos = analizar_requerimientos_excluyentes(
+                                texto=final_docs_list[n].page_content, 
+                                requerimientos=requerimientos_excluyentes
+                            )
+
+                            
+                            #st.write('**Area ideal:**')
+                            #st.write(categoria)
+                            #st.write('**Fortalezas del Candidato:**')
+                            #st.write(fortalezas)
+                            #st.write('**Debilidades del Candidato:**')
+                            #st.write(debilidades)
+                            #st.write('**Requisitos Excluyentes:**')
+                            #st.write(resultado_requerimientos)
+                            progress = (n + 1) / len(final_docs_list)
+                            progress_bar.progress(progress)
+                            percent_text.text(f"Progreso: {int(progress * 100)}%")
+                            time.sleep(7)
+                            
+                            st.session_state['results_df'] = pd.concat([
+                            st.session_state['results_df'], 
+                            pd.DataFrame([{
+                                "Nombre Archivo":nombre_archivo,
+                                "Nombre": nombre,
+                                "Apellido": apellido,
+                                "Nombre y Apellido": nombre_apellido,
+                                "Sexo": sexo,
+                                "Correo": correo,
+                                "Teléfono": telefono,
+                                "Fecha de Nacimiento": fecha_nacimiento,
+                                "Formación Académica": formacion_academica,
+                                "Experiencia Laboral": experiencia_laboral,
+                                "Match Score (%)": similitud,
+                                "Fortalezas": fortalezas,
+                                "Debilidades": debilidades,
+                                "Requisitos Excluyentes": resultado_requerimientos,
+                                "categoria":categoria
+                            }])
+                        ], ignore_index=True)
+                    else:
                         
-                        #st.write('**Area ideal:**')
-                        #st.write(categoria)
-                        #st.write('**Fortalezas del Candidato:**')
-                        #st.write(fortalezas)
-                        #st.write('**Debilidades del Candidato:**')
-                        #st.write(debilidades)
-                        #st.write('**Requisitos Excluyentes:**')
-                        #st.write(resultado_requerimientos)
-                        time.sleep(5)
-                        
-                        st.session_state['results_df'] = pd.concat([
-                        st.session_state['results_df'], 
-                        pd.DataFrame([{
-                            "Nombre Archivo":nombre_archivo,
-                            "Nombre": nombre,
-                            "Apellido": apellido,
-                            "Nombre y Apellido": nombre_apellido,
-                            "Sexo": sexo,
-                            "Correo": correo,
-                            "Teléfono": telefono,
-                            "Fecha de Nacimiento": fecha_nacimiento,
-                            "Formación Académica": formacion_academica,
-                            "Experiencia Laboral": experiencia_laboral,
-                            "Match Score (%)": similitud,
-                            "Fortalezas": fortalezas,
-                            "Debilidades": debilidades,
-                            "Requisitos Excluyentes": resultado_requerimientos,
-                            "categoria":categoria
-                        }])
-                    ], ignore_index=True)
+                        st.error(f'Error al procesar el Cv: {pdf[n].name}')
+                        progress = (n + 1) / len(final_docs_list)
+                        progress_bar.progress(progress)
+                        percent_text.text(f"Progreso: {int(progress * 100)}%")
+                        pass
                         
     if not st.session_state['results_df'].empty:
         st.subheader("Resultados del análisis")
