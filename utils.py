@@ -11,6 +11,7 @@ import ast
 from docx import Document as DocxDocument 
 import time
 import streamlit as st
+from io import BytesIO
 
 from pptx import Presentation
 
@@ -46,7 +47,10 @@ def clasificador_texto(texto):
         ResponseSchema(name='Telefono',description='Telefono del Candidato. Responde No se menciona en caso de no encontrar la respuesta'),
         ResponseSchema(name='Fecha de Nacimiento',description='Fecha de Nacimiento del Candidato. Responde No se menciona en caso de no encontrar la respuesta'),
         ResponseSchema(name='Formacion Academica',description='Cual es la formacion academica del candidato? Sea breve y conciso en la respuesta, citando los datos mas relevantes.'),
-        ResponseSchema(name='Experiencia Laboral',description='Cual es la experiencia laboral?Sea breve y conciso en la respuesta, citando los datos mas relevantes.')
+        ResponseSchema(name='Experiencia Laboral',description='Cual es la experiencia laboral?Sea breve y conciso en la respuesta, citando los datos mas relevantes.'),
+        ResponseSchema(name='Fortalezas',description='Cuales son las Fortalezas del Candidato con respecto al la descripcion del trabajo?'),
+        ResponseSchema(name='Debilidades',description='Cuales son las Debilidades del Candidato con respecto al la descripcion del trabajo?'),
+        ResponseSchema(name='Categoria',description='En que Area de la organizacion puede el candidato encajar basado en sus aptitudes y habilidades? No agregues informacion extra. Expresate con maximo 5 palabras')
     ]
 
     output_parser=StructuredOutputParser.from_response_schemas(response_schema)
@@ -61,8 +65,15 @@ def clasificador_texto(texto):
     prompt=PromptTemplate(template=template, input_variables=[texto],partial_variables={'format_instructions':format_instructions})
     #prompt=prompt.format_prompt(texto=texto).text
     #respuesta=llm.invoke(prompt)
+    #st.write(respuesta)
+    #pattern=r'({[^}]+})'
+    #matches=re.findall(pattern,respuesta)
+    #st.write(matches)
     chain=prompt|llm|output_parser
     respuesta=chain.invoke(texto)
+    #respuesta=ast.literal_eval(matches[0])
+    #chain=prompt|llm|output_parser
+    #respuesta=chain.invoke(texto)
     return respuesta
 
 # iterate over files in 
@@ -71,37 +82,41 @@ def create_docs(user_file_list, unique_id):
     docs = []
 
     for file in user_file_list:
+        if file is not None:
+             # Restablecer puntero del archivo original si necesitas usarlo de nuevo
+            
         # Leer contenido dependiendo del tipo de archivo
-        if file.name.endswith(".pdf"):
-            chunks = read_pdf_data(file)  # Función para extraer texto de PDFs
-        elif file.name.endswith(".docx"):
-            chunks = read_docx_data(file)  # Nueva función para extraer texto de Word
-        elif file.name.lower().endswith((".png", ".jpg", ".jpeg")):
-            upload_to_s3(file, bucket_name, file.name)
-            chunks = process_pdf(bucket=bucket_name, document=file.name) 
-            st.write(chunks)# Nueva función para extraer texto de imágenes
-        elif file.name.endswith(".pptx"):
-            chunks = extract_text_from_pptx(file)
-            #st.write(chunks)# Nueva función para extraer texto de PowerPoint
-        else:
-            raise ValueError(f"Tipo de archivo no soportado: {file.name}")
+            if file.name.endswith(".pdf"):
+                
+                chunks = read_pdf_data(file)  # Función para extraer texto de PDFs
+            elif file.name.endswith(".docx"):
+                chunks = read_docx_data(file)  # Nueva función para extraer texto de Word
+            elif file.name.lower().endswith((".png", ".jpg", ".jpeg")):
+                upload_to_s3(file, bucket_name, file.name)
+                chunks = process_pdf(bucket=bucket_name, document=file.name) 
+                st.write(chunks)# Nueva función para extraer texto de imágenes
+            elif file.name.endswith(".pptx"):
+                chunks = extract_text_from_pptx(file)
+                #st.write(chunks)# Nueva función para extraer texto de PowerPoint
+            else:
+                raise ValueError(f"Tipo de archivo no soportado: {file.name}")
 
         if len(chunks.strip()) < 5:  # Si el texto es menor a 5 caracteres
             try:
                 print(f"El contenido extraído de {file.name} es insuficiente. Intentando OCR...")
                 print(f'realizando proceso de ocr para archivo {file.name.lower()}')
                 #upload_to_s3(file, bucket_name, file.name)
-                upload_to_s3(file, bucket_name, file.name)
+            
                 chunks = process_pdf(bucket=bucket_name, document=file.name)
                 #st.write(chunks)
                 if chunks==None or len(chunks)<=10:
-                    chunks="[Contenido no extraído]"
-                    print(f'error al procesar el archivo {file.name.lower()}')
-                    
+                    raise ValueError(f'Verificar el archivo {file.name.lower()}, cuenta con algun error')
+
 
             except Exception as e:
-                st.write(f"OCR falló para {file.name}: {e}")
+                st.error(f"Verificar manualmente, fallo el archivo: {file.name.lower()}: {e}")
                 chunks = "[Contenido no extraído]"
+                continue
         
         # Agregar elementos a la lista con los datos y metadatos
         
@@ -210,7 +225,11 @@ def analizar_requerimientos_excluyentes(texto,requerimientos):
 
 
 
-
+def upload_json_to_s3(data, bucket_name, file_name):
+    """Sube un archivo JSON al bucket de S3."""
+    json_buffer = BytesIO(json.dumps(data).encode('utf-8'))  # Convertir el JSON a bytes
+    s3_client.put_object(Bucket=bucket_name, Key=file_name, Body=json_buffer.getvalue())
+    return f"s3://{bucket_name}/{file_name}"
 
 
 
