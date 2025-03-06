@@ -80,8 +80,9 @@ def clasificador_texto(texto):
 # that user uploaded PDF files, one by one
 def create_docs(user_file_list, unique_id):
     docs = []
-
+    
     for file in user_file_list:
+        name=f'raw/cvs/{file.name}'
         if file is not None:
              # Restablecer puntero del archivo original si necesitas usarlo de nuevo
             
@@ -92,8 +93,11 @@ def create_docs(user_file_list, unique_id):
             elif file.name.endswith(".docx"):
                 chunks = read_docx_data(file)  # Nueva función para extraer texto de Word
             elif file.name.lower().endswith((".png", ".jpg", ".jpeg")):
-                upload_to_s3(file, bucket_name, file.name)
-                chunks = process_pdf(bucket=bucket_name, document=file.name) 
+                name = f'raw/cvs/{file.name}'
+                file.seek(0)  # Asegura que el puntero del archivo esté al inicio antes de subirlo
+                upload_to_s3(file, bucket_name, name)
+                file.seek(0)  # Restablece el puntero antes de procesarlo con Textract
+                chunks = process_pdf(bucket=bucket_name, document=name) 
                 st.write(chunks)# Nueva función para extraer texto de imágenes
             elif file.name.endswith(".pptx"):
                 chunks = extract_text_from_pptx(file)
@@ -106,11 +110,14 @@ def create_docs(user_file_list, unique_id):
                 print(f"El contenido extraído de {file.name} es insuficiente. Intentando OCR...")
                 print(f'realizando proceso de ocr para archivo {file.name.lower()}')
                 #upload_to_s3(file, bucket_name, file.name)
-            
-                chunks = process_pdf(bucket=bucket_name, document=file.name)
+                file.seek(0)  # Asegura que el puntero del archivo esté al inicio antes de subirlo
+                upload_to_s3(file, bucket_name, name)
+                file.seek(0)  # Restablece el puntero antes de procesarlo con Textract
+                chunks = process_pdf(bucket=bucket_name, document=name)
                 #st.write(chunks)
                 if chunks==None or len(chunks)<=10:
-                    raise ValueError(f'Verificar el archivo {file.name.lower()}, cuenta con algun error')
+                    print('tiene algun error')
+                    #raise ValueError(f'Verificar el archivo {file.name.lower()}, cuenta con algun error')
 
 
             except Exception as e:
@@ -236,8 +243,10 @@ def upload_json_to_s3(data, bucket_name, file_name):
 # Función para subir el archivo a S3
 def upload_to_s3(file, bucket, object_name):
     try:
-        s3_client.upload_fileobj(file, bucket, object_name)
-        #st.success(f'Archivo {object_name} subido a {bucket}.')
+        file_bytes = BytesIO(file.read())  # Lee el contenido del archivo en memoria
+        file_bytes.seek(0)  # Reinicia el puntero antes de subirlo
+        s3_client.upload_fileobj(file_bytes, bucket, object_name)
+        file.seek(0)  # Vuelve a reiniciar el puntero después de subirlo
     except Exception as e:
         st.error(f'Error al subir el archivo: {e}')
 
@@ -309,8 +318,17 @@ def process_pdf(bucket, document):
 def read_docx_data(file):
     docx = DocxDocument(file)
     text = []
+
+    # Extraer texto de párrafos
     for paragraph in docx.paragraphs:
         text.append(paragraph.text)
+
+    # Extraer texto de tablas
+    for table in docx.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                text.append(cell.text)
+
     return "\n".join(text)
 
 
